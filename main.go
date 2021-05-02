@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/antchfx/htmlquery"
@@ -12,8 +13,6 @@ const (
 	TEST_START_PAGE string = "Hellsing"
 	TEST_END_PAGE   string = "Evangelion"
 )
-
-type PageDocument *html.Node
 
 type WikiNode struct {
 	ID           int
@@ -43,7 +42,9 @@ func (lp *LinksPool) NewPagesPool(level int) *LinksPool {
 }
 
 func main() {
-	article, err := htmlquery.LoadURL(WIKI_DOMAIN + TEST_START_PAGE)
+	startingLink := WIKI_DOMAIN + "/wiki/" + TEST_START_PAGE
+
+	article, err := htmlquery.LoadURL(startingLink)
 	if err != nil {
 		fmt.Printf("Can't load wiki page. Error: %v", err)
 	}
@@ -51,18 +52,24 @@ func main() {
 	fmt.Println(ParseAllLinks(article))
 }
 
-func ParseAllLinks(doc PageDocument) (map[string]string, error) {
-	refs := make(map[string]string)
+func GetArticle() {
 
-	res, err := htmlquery.QueryAll(doc, "//a[@href]")
+}
+
+func ParseAllLinks(doc *html.Node) (map[string]string, error) {
+	refs := make(map[string]string)
+	res, err := htmlquery.QueryAll(doc, "//*[@id='mw-content-text']/div[1]/p/a")
 	if err != nil {
 		return nil, err
 	}
+	if res == nil {
+		return nil, errors.New("no results after quering")
+	}
 	for _, node := range res {
-		fmt.Print(node)
+		// Every link element on wiki page equals this
+		// <a href="/wiki/<Article>" title="Article">Article</a>
+		refs[node.Attr[1].Val] = node.Attr[0].Val
 	}
 
 	return refs, nil
 }
-
-func keepOnlyPageContent(doc PageDocument) {}
