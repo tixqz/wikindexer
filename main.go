@@ -9,27 +9,25 @@ import (
 )
 
 const (
-	WIKI_DOMAIN     string = "https://en.wikipedia.org"
-	TEST_START_PAGE string = "Hellsing"
-	TEST_END_PAGE   string = "Evangelion"
+	WIKI_DOMAIN      string = "https://en.wikipedia.org"
+	TEST_START_PAGE  string = "Hellsing"
+	TEST_TARGET_PAGE string = "Evangelion"
 )
 
-type WikiNode struct {
-	ID           int
-	Title        string
-	PreviousPage *WikiNode
-	Last         bool
+type WikiArticleTree struct {
 }
 
 type ArticleNode struct {
-	links   []*LinksPool
-	level   int
-	hasLast bool
+	previous *ArticleNode
+	level    int
+	isTarget bool
 }
 
-func (an *ArticleNode) NewArticleNode(level int) *ArticleNode {
+func (an *ArticleNode) NewArticleNode(previous *ArticleNode, level int, isTarget bool) *ArticleNode {
 	return &ArticleNode{
-		level: level,
+		previous: previous,
+		level:    level,
+		isTarget: isTarget,
 	}
 }
 
@@ -37,8 +35,20 @@ type LinksPool struct {
 	pages map[string]string
 }
 
-func (lp *LinksPool) NewPagesPool(level int) *LinksPool {
-	return &LinksPool{}
+func (lp *LinksPool) NewPagesPool(pages map[string]string) *LinksPool {
+	return &LinksPool{
+		pages: pages,
+	}
+}
+
+func (lp *LinksPool) VerifyTarget() bool {
+	_, hasTarget := lp.pages[TEST_TARGET_PAGE]
+
+	return hasTarget
+}
+
+func (lp *LinksPool) CleanStartFromPool() {
+	delete(lp.pages, TEST_START_PAGE)
 }
 
 func main() {
@@ -52,7 +62,7 @@ func main() {
 	fmt.Println(ParseAllLinks(article))
 }
 
-func GetArticle() {
+func GetNextArticle() {
 
 }
 
@@ -72,4 +82,13 @@ func ParseAllLinks(doc *html.Node) (map[string]string, error) {
 	}
 
 	return refs, nil
+}
+
+func CheckStartAndTargetPagesExist(start, target string) bool {
+	fmt.Printf("Check wiki articles for %s and %s exist.", start, target)
+	return wikiExists(start) && wikiExists(target)
+}
+
+func wikiExists(url string) bool {
+	return true
 }
