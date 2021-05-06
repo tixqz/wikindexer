@@ -11,23 +11,24 @@ import (
 const (
 	WIKI_DOMAIN      string = "https://en.wikipedia.org"
 	TEST_START_PAGE  string = "Hellsing"
-	TEST_TARGET_PAGE string = "Evangelion"
+	TEST_TARGET_PAGE string = "Neon Genesis Evangelion"
 )
+
+var foundTarget chan *ArticleNode
 
 type WikiArticleTree struct {
 }
 
 type ArticleNode struct {
+	url      string
+	title    string
 	previous *ArticleNode
-	level    int
-	isTarget bool
 }
 
-func (an *ArticleNode) NewArticleNode(previous *ArticleNode, level int, isTarget bool) *ArticleNode {
+func NewArticleNode(url, title string, previous *ArticleNode) *ArticleNode {
 	return &ArticleNode{
+		title:    title,
 		previous: previous,
-		level:    level,
-		isTarget: isTarget,
 	}
 }
 
@@ -35,7 +36,7 @@ type LinksPool struct {
 	pages map[string]string
 }
 
-func (lp *LinksPool) NewPagesPool(pages map[string]string) *LinksPool {
+func NewPagesPool(pages map[string]string) *LinksPool {
 	return &LinksPool{
 		pages: pages,
 	}
@@ -52,20 +53,52 @@ func (lp *LinksPool) CleanStartFromPool() {
 }
 
 func main() {
-	startingLink := WIKI_DOMAIN + "/wiki/" + TEST_START_PAGE
 
-	article, err := htmlquery.LoadURL(startingLink)
-	if err != nil {
-		fmt.Printf("Can't load wiki page. Error: %v", err)
+	startingLink := WIKI_DOMAIN + "/wiki/" + TEST_START_PAGE
+	targetLink := WIKI_DOMAIN + "/wiki/" + TEST_TARGET_PAGE
+
+	if !CheckStartAndTargetPagesExist(startingLink, targetLink) {
+		fmt.Println("Wiki page for one of objects does not exist.")
 	}
 
-	fmt.Println(ParseAllLinks(article))
+	if !CheckStartAndTargetPagesNotSame(startingLink, targetLink) {
+		fmt.Println("Starting and target are same wiki pages.")
+	}
+
+	foundTarget = make(chan *ArticleNode, 1)
+	defer close(foundTarget)
+
+	go FindTarget(startingLink, TEST_START_PAGE, nil)
+
+	targetNode, ok := <-foundTarget
+
+	if ok {
+		BuildPathToTarget(targetNode)
+	} else {
+		fmt.Printf("Didn't found target: %s", TEST_TARGET_PAGE)
+	}
 }
 
-func GetNextArticle() {
+// FindTarget is the main function for finding target article.
+func FindTarget(url, title string, prev *ArticleNode) {
+	currentArticle := NewArticleNode(url, title, prev)
+	node, _ := htmlquery.LoadURL(WIKI_DOMAIN + url)
+	parsedPages, _ := ParseAllLinks(node)
+	pool := NewPagesPool(parsedPages)
+	pool.CleanStartFromPool()
 
+	hasTarget := pool.VerifyTarget()
+	if hasTarget {
+		foundTarget <- currentArticle
+		return
+	}
+
+	for nextTitle, nextUrl := range pool.pages {
+		go FindTarget(nextUrl, nextTitle, currentArticle)
+	}
 }
 
+// ParseAllLinks gets all links from article's body and map titles of links with url paths.
 func ParseAllLinks(doc *html.Node) (map[string]string, error) {
 	refs := make(map[string]string)
 	res, err := htmlquery.QueryAll(doc, "//*[@id='mw-content-text']/div[1]/p/a")
@@ -84,8 +117,16 @@ func ParseAllLinks(doc *html.Node) (map[string]string, error) {
 	return refs, nil
 }
 
+func BuildPathToTarget(node *ArticleNode) {
+
+}
+
+func CheckStartAndTargetPagesNotSame(startingLink, targetLink string) bool {
+	return true
+}
+
 func CheckStartAndTargetPagesExist(start, target string) bool {
-	fmt.Printf("Check wiki articles for %s and %s exist.", start, target)
+	fmt.Printf("Checking wiki articles for %s and %s exist...", start, target)
 	return wikiExists(start) && wikiExists(target)
 }
 
