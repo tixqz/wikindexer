@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
+	"sync"
 
 	"github.com/antchfx/htmlquery"
 	"golang.org/x/net/html"
@@ -14,10 +16,15 @@ const (
 	TEST_TARGET_PAGE string = "Neon Genesis Evangelion"
 )
 
+// foundTarget is a channel for found target nodes
 var foundTarget chan *ArticleNode
 
-type WikiArticleTree struct {
-}
+var (
+	// nodeBuffer is channel that works like
+	nodeBuffer chan *ArticleNode = make(chan *ArticleNode)
+	// errorBuffer
+	errorBuffer chan error = make(chan error)
+)
 
 type ArticleNode struct {
 	url      string
@@ -27,16 +34,26 @@ type ArticleNode struct {
 
 func NewArticleNode(url, title string, previous *ArticleNode) *ArticleNode {
 	return &ArticleNode{
+		url:      url,
 		title:    title,
 		previous: previous,
 	}
 }
 
+func (a *ArticleNode) LoadNode() (*html.Node, error) {
+	node, err := htmlquery.LoadURL(WIKI_DOMAIN + a.url)
+	if err != nil {
+		return nil, err
+	}
+	return node, nil
+}
+
 type LinksPool struct {
+	sync.RWMutex
 	pages map[string]string
 }
 
-func NewPagesPool(pages map[string]string) *LinksPool {
+func NewLinksPool(pages map[string]string) *LinksPool {
 	return &LinksPool{
 		pages: pages,
 	}
@@ -52,10 +69,17 @@ func (lp *LinksPool) CleanStartFromPool() {
 	delete(lp.pages, TEST_START_PAGE)
 }
 
+func (lp *LinksPool) Length() int {
+	return len(lp.pages)
+}
+
 func main() {
 
-	startingLink := WIKI_DOMAIN + "/wiki/" + TEST_START_PAGE
-	targetLink := WIKI_DOMAIN + "/wiki/" + TEST_TARGET_PAGE
+	startURL := "/wiki/" + TEST_START_PAGE
+	targetURL := "/wiki/" + TEST_TARGET_PAGE
+
+	startingLink := WIKI_DOMAIN + startURL
+	targetLink := WIKI_DOMAIN + targetURL
 
 	if !CheckStartAndTargetPagesExist(startingLink, targetLink) {
 		fmt.Println("Wiki page for one of objects does not exist.")
@@ -65,15 +89,16 @@ func main() {
 		fmt.Println("Starting and target are same wiki pages.")
 	}
 
+	fmt.Println("All checks are done!")
+
 	foundTarget = make(chan *ArticleNode, 1)
-	defer close(foundTarget)
 
-	go FindTarget(startingLink, TEST_START_PAGE, nil)
+	go FindTarget(startURL, TEST_START_PAGE, nil)
 
-	targetNode, ok := <-foundTarget
-
-	if ok {
-		BuildPathToTarget(targetNode)
+	if targetNode, ok := <-foundTarget; ok {
+		nodes := BuildPathToTarget(targetNode)
+		fmt.Println(nodes)
+		close(foundTarget)
 	} else {
 		fmt.Printf("Didn't found target: %s", TEST_TARGET_PAGE)
 	}
@@ -81,10 +106,17 @@ func main() {
 
 // FindTarget is the main function for finding target article.
 func FindTarget(url, title string, prev *ArticleNode) {
+
 	currentArticle := NewArticleNode(url, title, prev)
-	node, _ := htmlquery.LoadURL(WIKI_DOMAIN + url)
-	parsedPages, _ := ParseAllLinks(node)
-	pool := NewPagesPool(parsedPages)
+	node, err := htmlquery.LoadURL(WIKI_DOMAIN + url)
+	if err != nil {
+		log.Fatal(err)
+	}
+	parsedPages, err := ParseAllLinks(node)
+	if err != nil {
+		log.Fatal(err)
+	}
+	pool := NewLinksPool(parsedPages)
 	pool.CleanStartFromPool()
 
 	hasTarget := pool.VerifyTarget()
@@ -108,6 +140,7 @@ func ParseAllLinks(doc *html.Node) (map[string]string, error) {
 	if res == nil {
 		return nil, errors.New("no results after quering")
 	}
+
 	for _, node := range res {
 		// Every link element on wiki page equals this
 		// <a href="/wiki/<Article>" title="Article">Article</a>
@@ -117,8 +150,14 @@ func ParseAllLinks(doc *html.Node) (map[string]string, error) {
 	return refs, nil
 }
 
-func BuildPathToTarget(node *ArticleNode) {
+func BuildPathToTarget(node *ArticleNode) []*ArticleNode {
+	var nodes []*ArticleNode
 
+	for node.previous != nil {
+		nodes = append(nodes, node)
+	}
+
+	return nodes
 }
 
 func CheckStartAndTargetPagesNotSame(startingLink, targetLink string) bool {
